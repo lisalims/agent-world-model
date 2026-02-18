@@ -30,6 +30,14 @@ def generate_all_api_specs(args: Config):
     schema_data = tools_jsonl_load(args.input_db)    
     schema_map = {normalize_scenario_name(item["scenario"]): item for item in schema_data}
 
+    def get_model_max_tokens(model: str) -> int:
+        normalized = model.lower()
+        if normalized.startswith("gpt-4.1"):
+            return 32_768
+        if normalized.startswith("gpt-5"):
+            return 128_000
+        return 32_768
+
     def create_request(scenario_data):
         scenario_name = scenario_data["scenario"]
         schema_item = schema_map[normalize_scenario_name(scenario_name)]
@@ -54,7 +62,7 @@ def generate_all_api_specs(args: Config):
         return {
             "messages": messages,
             "temperature": 1.0,
-            "max_tokens": 128_000,
+            "max_tokens": get_model_max_tokens(args.model),
             "model": args.model,
         }
     
@@ -62,7 +70,7 @@ def generate_all_api_specs(args: Config):
     current_requests = [create_request(item) for item in current_items]
     
     results = []
-    client = GPTClient(timeout=30*60)
+    client = GPTClient(timeout=5*60)
     max_retries = args.max_retry
 
     for attempt in range(max_retries + 1):

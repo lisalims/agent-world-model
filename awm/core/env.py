@@ -321,6 +321,14 @@ def generate_all_environments(args: Config):
     api_specs_data = tools_jsonl_load(args.input_spec)
     db_schemas_data = tools_jsonl_load(args.input_db)
     schema_map = {normalize_scenario_name(item["scenario"]): item["db_schema"] for item in db_schemas_data}
+
+    def get_model_max_tokens(model: str) -> int:
+        normalized = model.lower()
+        if normalized.startswith("gpt-4.1"):
+            return 32_768
+        if normalized.startswith("gpt-5"):
+            return 128_000
+        return 32_768
     
     processed_api_spec_data = []
     for api_spec_item in api_specs_data:
@@ -406,7 +414,7 @@ def generate_all_environments(args: Config):
         return {
             "messages": messages,
             "temperature": 1.0,  # Lower temperature for more consistent code generation
-            "max_tokens": 128_000,  # Increased for complex implementations
+            "max_tokens": get_model_max_tokens(args.model),
             "model": args.model,
         }
     

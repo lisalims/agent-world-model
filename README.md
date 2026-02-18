@@ -81,14 +81,17 @@ export AZURE_OPENAI_API_KEY="your-api-key"
 export AWM_SYN_OVERRIDE_MODEL="your-model-name such as gpt-5"
 ```
 
+You can also place these keys in a local `.env` file and run commands with `uv run --env-file .env ...`.
+See [README_KEYS.md](README_KEYS.md) for a complete key setup template.
+
 ## 🔥 Synthesis
 
 ### AWM CLI
 
-All synthesis is exposed through the `awm` command-line tool. Run `awm --help` to see available commands:
+All synthesis is exposed through the `awm` command-line tool. Run `uv run awm --help` to see available commands:
 
 ```
-awm --help
+uv run awm --help
 
 Available commands:
   gen        Synthesis pipeline commands
@@ -108,15 +111,17 @@ Available commands:
   agent      Run a tool-use agent to solve a task by interacting with the environment
 ```
 
-Use `awm <command> --help` to see options for any command, e.g. `awm gen task --help`.
+Use `uv run awm <command> --help` to see options for any command, e.g. `uv run awm gen task --help`.
 
 ### Step 1: Scenario Generation
 We start with a seed set of scenarios and generate 1,000 unique scenario descriptions. Note that only the names are used as seeds; the descriptions are included in the seed file for ease of use.
 
 ```bash
-export EMBEDDING_OPENAI_API_KEY="your-api-key for the embedding model"
+cat > .env << 'EOF'
+EMBEDDING_OPENAI_API_KEY=your-api-key-for-the-embedding-model
+EOF
 
-awm gen scenario \
+uv run --env-file .env awm gen scenario \
     --input_path outputs/seed_scenario.jsonl \
     --output_path outputs/gen_scenario.jsonl \
     --target_count 1000
@@ -126,7 +131,7 @@ awm gen scenario \
 We generate 10 tasks per scenario, which are also serving as the requirements for building the environment.
 
 ```bash
-awm gen task \
+uv run --env-file .env awm gen task \
     --input outputs/gen_scenario.jsonl \
     --output outputs/gen_tasks.jsonl
 ```
@@ -136,12 +141,12 @@ We define the database schema and complete the initial state to fully support th
 
 ```bash
 # database schema
-awm gen db \
+uv run --env-file .env awm gen db \
     --input outputs/gen_tasks.jsonl \
     --output outputs/gen_db.jsonl
 
 # sample data for initial state
-awm gen sample \
+uv run --env-file .env awm gen sample \
     --input_task outputs/gen_tasks.jsonl \
     --input_db outputs/gen_db.jsonl \
     --output outputs/gen_sample.jsonl
@@ -152,13 +157,13 @@ We first generate API spec for better generating the Python code of the environm
 
 ```bash
 # API spec (interface schema)
-awm gen spec \
+uv run --env-file .env awm gen spec \
     --input_task outputs/gen_tasks.jsonl \
     --input_db outputs/gen_db.jsonl \
     --output outputs/gen_spec.jsonl
 
 # Environment code
-awm gen env \
+uv run --env-file .env awm gen env \
     --input_spec outputs/gen_spec.jsonl \
     --input_db outputs/gen_db.jsonl \
     --output outputs/gen_envs.jsonl
@@ -170,7 +175,7 @@ We provide two options for verification:
 2. purely code-based Judge (`code`)
 
 ```bash
-awm gen verifier \
+uv run --env-file .env awm gen verifier \
     --mode sql \
     --input_task outputs/gen_tasks.jsonl \
     --output outputs/gen_verifier.jsonl
@@ -182,21 +187,21 @@ Run and check each environment. The MCP endpoint will be available at `http://lo
 
 ```bash
 # Reset databases to initial state
-awm env reset_db \
+uv run --env-file .env awm env reset_db \
     --input_db outputs/gen_db.jsonl \
     --input_sample outputs/gen_sample.jsonl
 
 # Start MCP server for a scenario
-awm env start \
+uv run --env-file .env awm env start \
     --scenario "scenario_name" \
     --envs_load_path outputs/gen_envs.jsonl \
     --port 8001
 
 # Check if MCP server is running
-awm env check --url http://localhost:8001/mcp
+uv run --env-file .env awm env check --url http://localhost:8001/mcp
 
 # Batch test all generated environments
-awm env check_all --output outputs/gen_envs.jsonl
+uv run --env-file .env awm env check_all --input outputs/gen_envs.jsonl
 ```
 
 ### Agent Demo

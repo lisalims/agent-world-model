@@ -100,6 +100,14 @@ class GPTClient:
         plain = self._obj_to_plain(raw)
         return ChatCompletionFallback(plain)
 
+    def _get_model_max_completion_tokens(self, model: str) -> int | None:
+        normalized = model.lower()
+        if normalized.startswith("gpt-4.1"):
+            return 32_768
+        if normalized.startswith("gpt-5"):
+            return 128_000
+        return None
+
     def _build_refusal_completion(self, model: str, cf_results: dict[str, any]) -> ChatCompletionFallback:
         fallback = {
             "id": None,
@@ -150,8 +158,9 @@ class GPTClient:
         params = {"model": model, "messages": messages}
         if self._override_model:
             params["model"] = self._override_model
+        effective_model = params["model"]
         
-        if model.startswith('gpt-5'):
+        if effective_model.startswith('gpt-5'):
             temperature = 1.0
 
         params.update(kwargs)
@@ -162,6 +171,14 @@ class GPTClient:
         if 'max_tokens' in params:
             params['max_completion_tokens'] = params['max_tokens']
             del params['max_tokens']
+
+        model_limit = self._get_model_max_completion_tokens(effective_model)
+        if model_limit is not None and params.get("max_completion_tokens") is not None and params["max_completion_tokens"] > model_limit:
+            logger.warning(
+                f"Requested max_completion_tokens={params['max_completion_tokens']} exceeds limit for model {effective_model} ({model_limit}); clamping to {model_limit}."
+            )
+            params["max_completion_tokens"] = model_limit
+
         last_error = None
         retry_delay = self._retry_delay_seconds
         sem = semaphore or self._get_semaphore()

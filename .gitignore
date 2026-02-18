@@ -1,0 +1,9 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local environment files (secrets)
+.env
+.env.*
+!.env.example
