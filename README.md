@@ -206,7 +206,9 @@ uv run --env-file .env awm env check_all --input outputs/gen_envs.jsonl
 
 ### Agent Demo
 
-AWM includes a simple agent demo that connects to an MCP environment to solve tasks via multi-turn tool calling. Please start the environment and use [vLLM](https://github.com/vllm-project/vllm) to serve the model before running the agent.
+AWM includes a simple agent demo that connects to an MCP environment to solve tasks via multi-turn tool calling.
+
+#### Option A: vLLM backend
 
 ```bash
 # serve the model
@@ -219,8 +221,35 @@ awm env start --scenario e_commerce_33 --envs_load_path outputs/gen_envs.jsonl -
 awm agent \
     --task "show me the top 10 most expensive products" \
     --mcp_url http://localhost:8001/mcp \
+    --llm_provider vllm \
     --vllm_url http://localhost:8000/v1 \
     --model Snowflake/Arctic-AWM-4B
+```
+
+#### Option B: Azure OpenAI backend (no local vLLM)
+
+```bash
+# set AOAI credentials
+export AZURE_ENDPOINT_URL="https://your-endpoint.openai.azure.com/"
+export AZURE_OPENAI_API_KEY="your-api-key"
+
+# start the environment
+uv run --env-file .env awm env start --scenario gofundme --envs_load_path outputs/gen_envs.jsonl --port 8001
+
+# run the agent with AOAI
+uv run --env-file .env awm agent --task "Create a one-time donation intent of 75 USD to the campaign 'Community Food Pantry Restock' with donor name 'Alex Kim', a public message 'Happy to help—thank you for feeding our neighbors\!', and set anonymity to false." --mcp_url http://localhost:8001/mcp --llm_provider azure --model "gpt-4.1"
+```
+
+You can also pass AOAI settings through flags instead of environment variables:
+
+```bash
+uv run --env-file .env awm agent \
+    --task "show me the top 10 most expensive products" \
+    --mcp_url http://localhost:8001/mcp \
+    --llm_provider azure \
+    --aoai_endpoint_url "https://your-endpoint.openai.azure.com/" \
+    --llm_api_key "your-api-key" \
+    --model "your-azure-deployment-name"
 ```
 
 ## Citation

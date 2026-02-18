@@ -22,6 +22,9 @@ EMBEDDING_OPENAI_API_KEY=your-embedding-api-key
 # Azure OpenAI (use these instead of OPENAI_* when provider=azure)
 # AZURE_ENDPOINT_URL=https://your-endpoint.openai.azure.com/
 # AZURE_OPENAI_API_KEY=your-azure-openai-api-key
+
+# Agent runtime backend (optional; defaults to vllm)
+# AWM_AGENT_LLM_PROVIDER=azure
 EOF
 ```
 

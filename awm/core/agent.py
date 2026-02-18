@@ -1,5 +1,5 @@
 """
-Simple MCP Agent with vLLM Backend.
+Simple MCP Agent with vLLM/OpenAI/Azure OpenAI backends.
 Please refer to https://github.com/Snowflake-Labs/agent-world-model for more details.
 """
 import asyncio
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from textwrap import dedent
 
 from loguru import logger
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, AsyncAzureOpenAI
 
 from awm.tools import tools_robust_json_loads, isolated_mcp_env
 
@@ -37,8 +37,18 @@ class Config:
     task: str
     # MCP server URL (streamable HTTP transport)
     mcp_url: str
+    # LLM backend provider: vllm, openai, or azure
+    llm_provider: str = "vllm"
     # vLLM OpenAI-compatible API URL
     vllm_url: str = "http://localhost:8001/v1"
+    # OpenAI-compatible API URL for openai provider (optional)
+    openai_base_url: str = ""
+    # Azure OpenAI endpoint URL, e.g. https://xxx.openai.azure.com/
+    aoai_endpoint_url: str = ""
+    # Azure OpenAI api version
+    aoai_api_version: str = "2025-01-01-preview"
+    # API key override for selected provider (optional)
+    llm_api_key: str = ""
     # Model name (served_model_name in vLLM)
     model: str = "Snowflake/Arctic-AWM-4B"
     # Max agent loop iterations
@@ -302,10 +312,11 @@ class MCPToolExecutor:
                     return text
 
 async def generate_response(
-    client: AsyncOpenAI,
+    client: AsyncOpenAI | AsyncAzureOpenAI,
     model_name: str,
     messages: list[dict],
     config: Config,
+    use_vllm_extras: bool,
 ) -> tuple[str, list[dict]]:
     api_messages = []
     for msg in messages:
@@ -317,25 +328,33 @@ async def generate_response(
         elif role == "assistant":
             api_messages.append({"role": "assistant", "content": content})
         elif role == "tool":
-            api_messages.append({
-                "role": "tool",
-                "tool_call_id": msg.get("tool_call_id", "call_unknown"),
-                "content": content,
-            })
+            if use_vllm_extras:
+                api_messages.append({
+                    "role": "tool",
+                    "tool_call_id": msg.get("tool_call_id", "call_unknown"),
+                    "content": content,
+                })
+            else:
+                tool_call_id = msg.get("tool_call_id", "call_unknown")
+                api_messages.append({
+                    "role": "user",
+                    "content": f"Tool result ({tool_call_id}):\n{content}",
+                })
 
-    extra_body = {
-        "add_generation_prompt": True,
-        "min_tokens": 16,
-        "chat_template_kwargs": {"enable_thinking": True},
+    request_kwargs = {
+        "model": model_name,
+        "messages": api_messages,
+        "max_completion_tokens": config.max_tokens,
+        "temperature": config.temperature,
     }
+    if use_vllm_extras:
+        request_kwargs["extra_body"] = {
+            "add_generation_prompt": True,
+            "min_tokens": 16,
+            "chat_template_kwargs": {"enable_thinking": True},
+        }
 
-    response = await client.chat.completions.create(
-        model=model_name,
-        messages=api_messages,
-        max_completion_tokens=config.max_tokens,
-        temperature=config.temperature,
-        extra_body=extra_body,
-    )
+    response = await client.chat.completions.create(**request_kwargs)
 
     content = response.choices[0].message.content or ""
     tool_calls = parse_tool_calls(content)
@@ -343,21 +362,59 @@ async def generate_response(
     return content, tool_calls
 
 
+def build_llm_client(config: Config) -> tuple[AsyncOpenAI | AsyncAzureOpenAI, bool, str]:
+    provider = (os.environ.get("AWM_AGENT_LLM_PROVIDER") or config.llm_provider or "vllm").strip().lower()
+
+    if provider == "vllm":
+        client = AsyncOpenAI(
+            api_key=config.llm_api_key or os.environ.get('OPENAI_API_KEY') or "EMPTY",
+            base_url=config.vllm_url,
+        )
+        endpoint_label = config.vllm_url
+        return client, True, endpoint_label
+
+    if provider == "openai":
+        api_key = config.llm_api_key or os.environ.get('OPENAI_API_KEY')
+        if not api_key:
+            raise ValueError("OPENAI_API_KEY or --llm_api_key is required for llm_provider=openai")
+        base_url = config.openai_base_url or os.environ.get('OPENAI_BASE_URL', 'https://api.openai.com/v1')
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+        )
+        return client, False, base_url
+
+    if provider == "azure":
+        api_key = config.llm_api_key or os.environ.get('AZURE_OPENAI_API_KEY')
+        endpoint = config.aoai_endpoint_url or os.environ.get('AZURE_ENDPOINT_URL')
+        if not endpoint:
+            raise ValueError("AZURE_ENDPOINT_URL or --aoai_endpoint_url is required for llm_provider=azure")
+        if not api_key:
+            raise ValueError("AZURE_OPENAI_API_KEY or --llm_api_key is required for llm_provider=azure")
+        client = AsyncAzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=api_key,
+            api_version=config.aoai_api_version,
+        )
+        return client, False, endpoint
+
+    raise ValueError("Invalid --llm_provider. Use one of: vllm, openai, azure")
+
+
 async def run_agent(config: Config):
+    llm_client, use_vllm_extras, endpoint_label = build_llm_client(config)
+
     logger.info("=" * 80)
     logger.info("MCP Agent")
     logger.info("=" * 80)
     logger.info(f"Task: {config.task}")
     logger.info(f"MCP Server: {config.mcp_url}")
-    logger.info(f"vLLM Server: {config.vllm_url}")
+    logger.info(f"LLM Provider: {config.llm_provider}")
+    logger.info(f"LLM Endpoint: {endpoint_label}")
     logger.info(f"Model: {config.model}")
     logger.info("=" * 80)
 
     mcp = MCPToolExecutor(config.mcp_url)
-    vllm_client = AsyncOpenAI(
-        api_key=os.environ.get('OPENAI_API_KEY') or "EMPTY",
-        base_url=config.vllm_url,
-    )
 
     logger.info("Connecting to MCP server and fetching tools...")
     tools = await mcp.list_tools()
@@ -374,7 +431,7 @@ async def run_agent(config: Config):
         logger.info(f"\n--- Iteration {iteration}/{config.max_iterations} ---")
 
         content, tool_calls = await generate_response(
-            vllm_client, config.model, messages, config,
+            llm_client, config.model, messages, config, use_vllm_extras,
         )
 
         if config.verbose:
